@@ -1014,7 +1014,6 @@ var JotForm = {
                 this.handleSignatureEvents();
                 this.handleSignSignatureInputs();
                 this.handleFITBInputs();
-                this.initTestEnvForBranding21();
                 if (JotForm.newDefaultTheme || JotForm.extendsNewTheme) {
                     // createNewComponent(data-type, function).render()
                     // createNewComponent({ selector: '.form-radio + label', type: 'field' }, this.initRadioInputV2).render();
@@ -2761,7 +2760,7 @@ var JotForm = {
     /**
      * Show Difference Between time ranges
      */
-    displayTimeRangeDuration: function (id) {
+    displayTimeRangeDuration: function (id, justCalculate) {
         var displayDuration = function () {
             if ($('input_' + id + '_hourSelectRange')) {
                 var sHour = $('input_' + id + '_hourSelect').value;
@@ -2800,10 +2799,13 @@ var JotForm = {
                     diff -= hours * 1000 * 60 * 60;
                     var min = Math.floor(diff / 1000 / 60);
                     if (min < 10) min = '0' + min;
+                    if(justCalculate){
+                        return [hours, min];
+                    }
                     durationLabel.update('<b>Total ' + hours + ':' + min + '</b>');
                     durationLabel.setStyle({'color': 'black'});
                     $$('input[id=duration_' + id + '_ampmRange][type="hidden"]').first().setValue(hours + ':' + min);
-                } else {
+                } else if (!justCalculate) {
                     durationLabel.update('&nbsp');
                 }
 
@@ -2827,7 +2829,20 @@ var JotForm = {
             $('input_' + id + '_ampm').observe('change', displayDuration);
             $('input_' + id + '_ampmRange').observe('change', displayDuration);
         }
-        displayDuration();
+        var timeDiff;
+        if(JotForm.isEditMode()){
+            var waitDom = function () {
+                if($('input_' + id + '_hourSelectRange') && $('input_' + id + '_hourSelectRange').value.empty()) {
+                    window.setTimeout(waitDom, 100);
+                } else {
+                    timeDiff = displayDuration();
+                }
+            }
+            waitDom();
+        } else{
+            timeDiff = displayDuration();
+        }
+        return timeDiff;
     },
 
 
@@ -3129,7 +3144,7 @@ var JotForm = {
      * to be restored later
      */
     getDefaults: function () {
-        $$('.form-textbox, .form-dropdown, .form-textarea').each(function (input) {
+        $$('.form-textbox, .form-dropdown, .form-textarea, .form-hidden-time').each(function (input) {
             if (input.hinted || input.value === "") {
                 return;
                 /* continue; */
@@ -6022,7 +6037,6 @@ var JotForm = {
             }
             if ((condition.link.toLowerCase() == 'any' && any) || (condition.link.toLowerCase() == 'all' && all)) {
                 calc.conditionTrue = true;
-                if(JotForm.ignoreInsertionCondition) return;
                 JotForm.checkCalculation(calc);
             } else {
                 calc.conditionTrue = false;
@@ -6661,10 +6675,9 @@ var JotForm = {
         });
     },
 
-    runAllCalculations: function (ignoreEditable, htmlOnly) {
+    runAllCalculations: function (ignoreEditable, tagReplacementOnly) {
         $A(JotForm.calculations).each(function (calc, index) {
-            if(htmlOnly && JotForm.getInputType(calc.resultField) !== "html") return;
-            if (!(ignoreEditable && (!calc.readOnly || calc.readOnly == "0")) && !!calc.equation) {
+            if (!(tagReplacementOnly && calc.tagReplacement !== '1') && !(ignoreEditable && (!calc.readOnly || calc.readOnly == "0")) && !!calc.equation) {
                 JotForm.checkCalculation(calc);
             }
         });
@@ -6735,6 +6748,8 @@ var JotForm = {
     },
 
     checkCalculation: function (calc) {
+        if(JotForm.ignoreInsertionCondition) return;
+
         if (!calc.resultField || (calc.hasOwnProperty('conditionTrue') && !calc.conditionTrue)) {
             return '';
         }
@@ -7151,18 +7166,28 @@ var JotForm = {
                     break;
 
                 case 'time':
-                    if ($('until_'+data) && $("duration_" + data + "_ampmRange")) {
-                        if (numeric) {
-                            var duration = $("duration_" + data + "_ampmRange").value;
-                            if (duration.indexOf(":") > -1) {
-                                var time = duration.split(":");
-                                var hours = time[0] || 0;
-                                var mins = time[1] || 0;
-                                var millis = Date.UTC('1970', '0', '1', hours, mins);
-                                val = millis / 60 / 60 / 1000;
+                    if ($('until_' + data)) {
+                        if ($("duration_" + data + "_ampmRange") && !$("duration_" + data + "_ampmRange").value.empty()) {
+                            if (numeric) {
+                                var duration = $("duration_" + data + "_ampmRange").value;
+                                if (duration.indexOf(":") > -1) {
+                                    var time = duration.split(":");
+                                    var hours = time[0] || 0;
+                                    var mins = time[1] || 0;
+                                    var millis = Date.UTC('1970', '0', '1', hours, mins);
+                                    val = millis / 60 / 60 / 1000;
+                                }
+                            } else {
+                                val = $("duration_" + data + "_ampmRange").value;
                             }
                         } else {
-                            val = $("duration_" + data + "_ampmRange").value;
+                            var res = JotForm.displayTimeRangeDuration(data, true);
+                            if(res){ 
+                                var hours = res[0] || 0;
+                                var mins = res[1] || 0;
+                                var millis = Date.UTC('1970', '0', '1', hours, mins);
+                                val = numeric ? millis / 60 / 60 / 1000 : (hour + ":" + mins);
+                            }
                         }
                         break;
                     }
@@ -7684,7 +7709,7 @@ var JotForm = {
         };
 
         var output = calculate(calc.equation);
-        if (!(typeof output== "string" && output.length > 1) && parseFloat(output) === 0 && $('input_' + result) && ($('input_' + result).readAttribute('defaultValue') != null || $('input_' + result).readAttribute('data-defaultvalue'))) {
+        if (!(typeof output== "string" && output.length > 1) && parseFloat(output) === 0 && $('input_' + result) && ($('input_' + result).readAttribute('defaultValue') != null || $('input_' + result).readAttribute('data-defaultvalue') != null)) {
             output = $('input_' + result).readAttribute('defaultValue') || $('input_' + result).readAttribute('data-defaultvalue');
         }
 
@@ -11288,7 +11313,7 @@ var JotForm = {
                 }, 40);
 
                 setTimeout(function () {
-                    JotForm.runAllConditions();
+                    JotForm.runAllConditions(true);
                 }, 50);
             };
         });
@@ -11563,19 +11588,6 @@ var JotForm = {
                 if (formSection) formSection.classList.add('ndt-test-env');
             }
         }
-    },
-
-    initTestEnvForBranding21: function() {
-        if (!window || !window.location || !window.location.href) return;
-        var favicon = document.querySelector('link[rel="shortcut icon"]');
-        window.isDarkMode = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        if(!favicon) return;
-
-        var isEnterprise = typeof JotForm.enterprise !== 'undefined' && JotForm.enterprise;
-        // Enterprises use their own favicon
-        if (isEnterprise) return;
-
-        favicon.href = window.isDarkMode ? "https://cdn.jotfor.ms/assets/img/favicons/favicon-2021-dark.png" : "https://cdn.jotfor.ms/assets/img/favicons/favicon-2021-light.png";
     },
     /**
      * init time input events for timev2 (time & datetime fields)
@@ -14456,15 +14468,13 @@ var JotForm = {
                                 if(range[0].indexOf("{") > -1) {
                                     startDate = JotForm.dateFromField(range[0]);
                                 } else {
-                                    var start = range[0].split("-");
-                                    startDate = new Date(start[0], parseInt(start[1])-1, start[2]);
+                                    startDate = new Date(range[0]);
                                 }
                                 var endDate;
                                 if(range[1].indexOf("{") > -1) {
                                     endDate = JotForm.dateFromField(range[1]);
                                 } else {
-                                    var end = range[1].split("-");
-                                    endDate = new Date(end[0], parseInt(end[1])-1, end[2]);
+                                    endDate = new Date(range[1]);
                                 }
                                 if(endDate) {
                                     endDate.setDate(endDate.getDate() + 1);
@@ -15772,7 +15782,12 @@ var JotForm = {
 
     },
 
-    runAllConditions: function () {
+    runAllConditions: function (allowInsertion) {
+        if (!allowInsertion && JotForm.isEditMode()) {
+            // not ignore insertion condition if save&continue is actived
+            var isCardFormContinueLater = !!window.CardForm && window.CardForm.continueLater && window.CardForm.continueLater.active;
+            JotForm.ignoreInsertionCondition = !isCardFormContinueLater && (!JotForm.isNewSaveAndContinueLaterActive && document.location.href.indexOf('session=') === -1);
+        }
         $H(JotForm.fieldConditions).each(function (pair) {
             var field = pair.key;
             var event = pair.value.event;
@@ -15782,7 +15797,7 @@ var JotForm = {
             if (["autofill", "number", "autocomplete"].include(event)) event = "keyup";
             $(field).run(event);
         });
-        if (JotForm.isEditMode()) {
+        if (!allowInsertion && JotForm.isEditMode()) {
             JotForm.ignoreInsertionCondition = null;
         }
     },

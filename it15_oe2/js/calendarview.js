@@ -857,15 +857,13 @@ Calendar.prototype = {
                         if(start.indexOf("{") > -1) {
                             startDate = JotForm.dateFromField(start);
                         } else {
-                            startDate = start.split("-");
-                            startDate = new Date(startDate[0], startDate[1]-1, startDate[2], 0, 0, 0);
+                            startDate = new Date(start);
                         }
                         var endDate;
                         if(end.indexOf("{") > -1) {
                             endDate = JotForm.dateFromField(end);
                         } else {
-                            endDate = end.split("-");
-                            endDate = new Date(endDate[0], endDate[1]-1, endDate[2], 0, 0, 0);
+                            endDate = new Date(end);
                         }
                         if(endDate) {
                             endDate.setDate(endDate.getDate()+1);
